@@ -1,42 +1,68 @@
-## Per-stage security gates
+# Security Gates — pygoat
 
+## 1. Purpose
 
-| stage          | tool        | reads                                                                    | fail when                                                                 | warn when                                                                                                             | info when                          | why                                                                                                                                                                                                                             |
-| -------------- | ----------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| secrets        | Gitleaks    | Git history, commits, working tree                                       | A suspected secret/credential is detected                                 | —                                                                                                                     | Informational pattern match        | A false positive is cheap to review and allowlist, but a missed real secret can be exposed publicly and cannot be reliably undone; therefore suspected secrets fail.                                                            |
-| SCA            | OSV-Scanner | `requirements.txt`, lockfiles/dependency manifests                       | A dependency has a known high/critical vulnerability with a fix available | A lower-severity vulnerability, or a high/critical vulnerability with no fix that is covered by an approved allowlist | Dependency/version inventory       | A fixable high/critical vulnerability is actionable and should block; no-fix findings need an owner and expiry through the allowlist rather than being ignored indefinitely.                                                    |
-| SAST           | Semgrep     | Application source code                                                  | A high-confidence security finding is detected                            | A lower-confidence finding is detected                                                                                | Informational/code-quality finding | SAST guesses from code without running the app, so it produces false positives; only high-confidence findings fail, while the rest warn.                                                                                        |
-| IaC            | Checkov     | Terraform, Dockerfiles, GitHub Actions/workflows and other configuration | A high/critical security misconfiguration is detected                     | A lower-severity or non-security-critical policy violation is detected                                                | Informational policy result        | IaC findings are true configuration facts, but not every policy violation has the same blast radius for the application; security-critical misconfigurations fail, while lower-impact ones warn.                                |
-| container scan | Trivy       | Built container image, OS packages and application dependencies          | A high/critical vulnerability with a fix available is found in the image  | A lower-severity vulnerability, or a high/critical vulnerability with no fix that is covered by an approved allowlist | Image/package inventory            | The image is the artifact that ships, so a fixable high/critical vulnerability directly affects what reaches production; no-fix findings need an owner and expiry through the allowlist rather than being ignored indefinitely. |
-| DAST           | OWASP ZAP   | Running application over HTTP(S)                                         | A confirmed high-impact vulnerability is detected **in staging**          | A lower-confidence or lower-impact finding is detected                                                                | Informational observation          | DAST runs against the deployed application after merge, so it cannot block the PR; a red result blocks promotion/release instead, while lower-impact findings warn.                                                             |
+This document is for developers whose PR is blocked by a security gate. It explains why the gate failed, what must be fixed or accepted, and how to get unblocked safely.
 
+Security gates prioritize real risk using confidence, and blast radius rather than treating every scanner finding equally.
 
-## Rollout
+## 2. Gates per stage
 
-Security gates are introduced progressively rather than making every existing finding block the pipeline immediately.
+| Stage      | Scanner                  | FAIL when                                                                                                                                                                                        | WARN when                                                                                                           | INFO                                                                                    | Why this split                                                                    |
+| ---------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Pre-commit | Secret scan              | Secret detected, because credentials must not enter commits.                                                                                                                                     | —                                                                                                                   | —                                                                                       | Stop secrets as early as possible.                                                |
+| PR         | Secret scan              | Secret detected, because pre-commit can be bypassed with `--no-verify`.                                                                                                                          | —                                                                                                                   | —                                                                                       | The PR gate prevents bypassing local protection.                                  |
+| PR         | SCA                      | **New** high/critical vulnerability with a fix available, because an actionable dependency vulnerability should block. **KEV always fails**, because active exploitation increases blast radius. | Existing finding or high/critical with no fix, because it was not introduced by the PR or cannot yet be remediated. | Low-severity findings, because their immediate impact is limited.                       | Fail actionable new risk; manage legacy/no-fix risk through ownership and expiry. |
+| PR         | SAST                     | High-confidence SQL injection such as `views.py:157`, because attacker-controlled input reaches raw SQL and can directly affect data.                                                            | Lower-confidence findings, because they need manual validation before blocking.                                     | Informational/code-quality findings, because they have no demonstrated security impact. | High-confidence security defects have enough evidence and impact to block.        |
+| PR         | IaC                      | Security-critical misconfiguration such as missing Dockerfile `USER`, because the container runs as root and increases compromise impact.                                                        | Lower-risk configuration issues, because they have lower immediate impact.                                          | Informational hardening recommendations.                                                | Privilege and blast radius determine whether configuration should block.          |
+| Post-merge | Image scan               | **New** high/critical vulnerability with a fix available, because the vulnerable artifact is about to be deployed.                                                                               | Existing or high/critical with no fix, because it was not introduced by the change or cannot yet be remediated.     | Informational package/hardening findings.                                               | Scan the actual artifact; fail new actionable vulnerabilities.                    |
+| Nightly    | Full-history secret scan | Alert security + rotate the key, because a live secret such as the planted `AKIA…` key may remain exposed in Git history.                                                                        | —                                                                                                                   | Historical/non-live matches requiring investigation.                                    | Full-history scanning catches secrets that were committed and later deleted.      |
+| Staging    | DAST                     | Confirmed high-impact vulnerability, because the running application can be attacked before production.                                                                                          | Lower-confidence or lower-impact finding, because it needs validation before blocking release.                      | Informational observations.                                                             | DAST requires a running application and therefore blocks promotion, not the PR.   |
 
-1. **Baseline:** run all scanners and publish their results without blocking.
-2. **Block new critical/high findings:** findings introduced by a change block the PR once the scanner is trusted and tuned.
-3. **Expand coverage:** progressively enable blocking for SCA, SAST, IaC, container scanning and DAST according to the risk of each stage.
-4. **Existing findings:** do not block unrelated legacy findings; track them separately and reduce the baseline over time.
-5. **KEV override:** a vulnerability listed in CISA's Known Exploited Vulnerabilities (KEV) catalog is treated as blocking regardless of the normal severity threshold, unless an explicit security-approved exception exists.
+**SCA "new only"** means the PR fails only for vulnerabilities introduced by the change; existing findings do not suddenly turn an otherwise unrelated PR red. A vulnerability in CISA's **KEV** catalog overrides this rule and fails because it is known to be actively exploited.
 
-## Allowlist format
+## 3. Rollout
 
-Allowlist entries must identify the exact finding, its location, reason, owner and expiry/review date. Example from `PLANTED.md`:
+1. **Warn:** run the new gate and publish findings without blocking.
+2. **Fail new:** block newly introduced high-risk findings once the gate is trusted and tuned.
+3. **Expand:** progressively enforce the remaining gates.
+4. **Baseline:** existing findings remain tracked but do not block unrelated PRs.
+5. **KEV override:** KEV vulnerabilities fail regardless of the normal threshold unless security approves an explicit exception.
+
+## 4. Allowlist (risk acceptance)
+
+The allowlist is version-controlled in the repository and changes require a PR.
+
+Each entry contains five fields:
 
 ```yaml
-- id: <scanner-finding-id>
-  location: ".github/workflows/flake8.yml:18-23"
-  reason: "GitHub Actions are not pinned to immutable commit SHAs"
-  owner: "<team-or-owner>"
-  expires: "<YYYY-MM-DD>"
+- id: CVE-2023-32681
+  location: "requirements.txt"
+  reason: "no proxy in use, upgrade breaks a test"
+  owner: "ken"
+  expires: "2026-12-31"
 ```
 
-The allowlist should be version-controlled and changes must go through a PR review.
+**Approved by security (CODEOWNERS).**
 
-## Unblock path
+**Require review from Code Owners** must be enabled so allowlist changes cannot merge without the designated owner.
 
-* **Fix:** preferred path — remediate the finding and rerun the affected gate.
-* **Allowlist PR:** if the finding is accepted risk or a false positive, submit a reviewed, time-bounded allowlist entry with justification and ownership.
-* **Break-glass:** for an urgent production/release need, an authorised maintainer may temporarily bypass the gate; the bypass must be recorded, justified and followed by remediation or an allowlist PR.
+**Expired → gate fails.**
+
+**Never allowlisted: live secrets.**
+
+## 5. Blocked? Unblocked in under 1 hour
+
+1. Read the gate result and identify the exact finding.
+2. Fix the finding and rerun the gate.
+3. If it is an accepted risk or false positive, submit a time-bound allowlist PR.
+4. **Security responds within 1 h.**
+5. For an urgent release, use break-glass: `gh pr merge --admin`. The bypass must be **logged in the PR**, justified, and followed by remediation or an allowlist PR.
+
+## 6. Where findings go
+
+Scanner results are uploaded as **SARIF** to GitHub **Code Scanning**.
+
+* **FAIL** → blocks the relevant gate or promotion.
+* **WARN** → visible to developers for review but does not block.
+* **INFO** → recorded for visibility and investigation.
