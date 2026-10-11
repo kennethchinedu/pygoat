@@ -31,6 +31,7 @@ jobs:
         run: |
           snyk container test pygoat:ci \
             --file=Dockerfile \
+            --policy-path=.snyk \
             --severity-threshold=high \
             --fail-on=upgradable \
             --sarif-file-output=snyk.sarif
