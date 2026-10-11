@@ -5,5 +5,12 @@
     "reason": "Test entry for the gate: planted shell=True, J01 must-do 2",
     "owner": "ken",
     "expires": "2026-12-31"
+  },
+  {
+    "id": "python.django.security.injection.command.subprocess-injection.subprocess-injection",
+    "location": "challenge/views.py",
+    "reason": "Test entry for the gate: planted shell=True, J01 must-do 2",
+    "owner": "ken",
+    "expires": "2026-12-31"
   }
 ]
