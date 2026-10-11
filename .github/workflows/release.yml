@@ -36,7 +36,8 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Show digest
-        run: echo "Pushed digest: ${{ steps.push.outputs.digest }}"
+        run: |
+          echo "Pushed digest: ${{ steps.push.outputs.digest }}"
 
 
 
