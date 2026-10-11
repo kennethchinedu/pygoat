@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    branches: [ master,  j03-sign]
+
+permissions:
+  contents: read
+  packages: write        
+  id-token: write        
+  attestations: write    
+
+jobs:
+  release:
+
+    runs-on: ubuntu-latest
+
+    steps: 
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build image
+        run: |
+          docker build -t ghcr.io/kennethchinedu/pygoat:${{ github.sha }} .
+      
+      - name: Sign in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push image
+        id: push                          # an ID so later steps can refer to this step
+        run: |
+          docker push ghcr.io/kennethchinedu/pygoat:${{ github.sha }}
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/kennethchinedu/pygoat:${{ github.sha }} | cut -d@ -f2)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Show digest
+        run: echo "Pushed digest: ${{ steps.push.outputs.digest }}"
+
+
+
