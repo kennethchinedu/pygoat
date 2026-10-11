@@ -105,7 +105,8 @@ jobs:
           gh attestation verify oci://ghcr.io/kennethchinedu/pygoat@${{ needs.release.outputs.digest }} \
           -R kennethchinedu/pygoat
         env:
-          GH_TOKEN: ${{ secrets.github.token }}
+          GH_TOKEN: ${{ github.token }}
+
 
 
       
