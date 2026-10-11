@@ -534,9 +534,4 @@ ignore:
           Owner: ken. Review by expiry.
         expires: 2026-12-31T00:00:00.000Z
         created: 2026-10-11T15:25:08.440Z
-  SNYK-PYTHON-PARAMIKO-42086:
-    - '*':
-        reason: 'Plant for J03 gate test. Upgrade to 2.4.1 planned. Owner: ken.'
-        expires: 2026-10-10T00:00:00.000Z
-        created: 2026-10-11T15:38:24.742Z
 patch: {}
